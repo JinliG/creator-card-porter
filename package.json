@@ -1,0 +1,10 @@
+{
+  "name": "creator-card-porter",
+  "version": "0.2.2",
+  "private": true,
+  "description": "Chrome Manifest V3 extension for migrating creator-owned character cards to the target platform.",
+  "scripts": {
+    "test": "node adapters/janitorai.spec.mjs",
+    "check": "node --check capture/page-bridge.js && node --check capture/content.js && node --check popup/popup.js && npm test"
+  }
+}
