@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy &amp; data use · Creator Card Porter</title>
+    <link rel="stylesheet" href="privacy.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">CREATOR CARD PORTER</p>
+      <h1>Privacy &amp; data use</h1>
+      <p class="updated">Last updated: July 17, 2026</p>
+
+      <section class="summary">
+        <strong>Capture is manual and local.</strong>
+        The extension reads the selected creator page only after you click
+        <em>Capture current page</em>. It has no developer-operated upload or
+        analytics service.
+      </section>
+
+      <section>
+        <h2>Data handled</h2>
+        <p>
+          A capture can contain character or Lorebook text and settings, image
+          URLs, resource identifiers, and a capture time. The current page URL is
+          checked only to verify support and identify the selected character or
+          Scripts editor; it is not retained as browsing history.
+        </p>
+        <p>
+          This includes complete creator-form records, including source fields
+          that do not have a target form mapping.
+        </p>
+        <p>
+          In experimental <em>Other</em> mode, the extension reads recognizable
+          native form controls on the selected page after the capture click. It
+          does not guess or probe API endpoints on an unknown site.
+        </p>
+        <p>
+          On JanitorAI creator edit pages, the extension reads source data already
+          loaded into the editor. It does not read, copy, or export the page's
+          authorization token.
+        </p>
+        <p>
+          Chats, passwords, cookies, authorization headers, and API keys are not
+          collected.
+        </p>
+      </section>
+
+      <section>
+        <h2>Purpose and retention</h2>
+        <p>
+          Captured data is used only to preview field mappings and create the JSON
+          file you request. Captured sources are kept in local extension storage so
+          separate character and Lorebook pages can be combined. If the complete
+          source cannot be stored, the extension reports an error instead of
+          silently truncating it.
+        </p>
+        <p>
+          Data remains until you choose <em>Clear captures</em> or uninstall the
+          extension. A file leaves the browser only when you explicitly copy,
+          download, or share it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Permissions</h2>
+        <dl>
+          <dt>activeTab</dt>
+          <dd>Temporarily identifies the tab you selected.</dd>
+          <dt>scripting</dt>
+          <dd>Runs the capture helper only after you click the capture button.</dd>
+          <dt>storage</dt>
+          <dd>Keeps selected sources locally until you clear them.</dd>
+        </dl>
+      </section>
+
+      <section>
+        <h2>Diagnostic console logs</h2>
+        <p>
+          For troubleshooting, the extension writes capture lifecycle metadata
+          to the selected page's DevTools Console with the prefix
+          <code>[Creator Card Porter]</code>. Logs can include the source type,
+          resource identifier, capture strategy, counts, and failure stage. They
+          never include captured field values, full response bodies, cookies,
+          authorization tokens, or request headers.
+        </p>
+      </section>
+
+      <section>
+        <h2>Open source</h2>
+        <p>
+          Creator Card Porter is an independent open-source utility maintained
+          through community contributions. References to supported services are
+          descriptive compatibility labels only; names and marks remain with their
+          respective owners.
+        </p>
+      </section>
+
+      <footer>
+        Privacy questions can be sent through the support contact on the Chrome Web
+        Store listing or raised in the public source repository.
+      </footer>
+    </main>
+  </body>
+</html>

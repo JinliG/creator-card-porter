@@ -5,7 +5,7 @@ function assert(condition, message) {
 }
 
 function assertEqual(actual, expected, message) {
-  if (actual !== expected) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
       `${message}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
     );
@@ -13,7 +13,7 @@ function assertEqual(actual, expected, message) {
 }
 
 function testBuildDocumentMapsJanitorFields() {
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument({
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument({
     platform: "janitorai",
     kind: "network",
     url: "https://janitorai.com/hampter/characters/char-1",
@@ -38,7 +38,17 @@ function testBuildDocumentMapsJanitorFields() {
   });
 
   assertEqual(documentValue.schema, "creator-card-porter.character-form-source", "schema name");
-  assertEqual(documentValue.version, 1, "schema version");
+  assertEqual(documentValue.version, 2, "schema version");
+  assertEqual(
+    documentValue.source.character.data.exampleDialogs,
+    "{{char}}: Example",
+    "source should preserve the full character field set",
+  );
+  assertEqual(
+    documentValue.source.scripts.length,
+    0,
+    "character-only capture should not invent separate scripts",
+  );
   assertEqual(documentValue.form.basicInfo.name, "Test Character", "name mapping");
   assertEqual(
     documentValue.form.basicInfo.hook,
@@ -56,11 +66,20 @@ function testBuildDocumentMapsJanitorFields() {
     documentValue.form.characterSettings.persona.includes("<example_dialogs>"),
     "example dialogs should be appended to persona",
   );
-  assertEqual(documentValue.unmapped[0]?.sourceField, "scripts", "scripts remain explicit");
+  assertEqual(
+    documentValue.unmapped[0]?.sourceField,
+    "source.character.data.scripts",
+    "scripts remain explicit",
+  );
+  assertEqual(
+    documentValue.mapping[0]?.sourceFields[0],
+    "source.character.data.name",
+    "mapping should point to the complete source path",
+  );
 }
 
 function testRequestBodyWinsWhenSaveResponseIsSparse() {
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument({
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument({
     platform: "janitorai",
     kind: "network",
     url: "https://janitorai.com/hampter/characters/char-2",
@@ -121,7 +140,7 @@ function createLorebookCapture() {
 }
 
 function testSeparateLorebookCaptureMapsToPlaybook() {
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument(
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument(
     {
       platform: "janitorai",
       kind: "network",
@@ -166,11 +185,11 @@ function testSeparateLorebookCaptureMapsToPlaybook() {
 }
 
 function testLorebookCanExportWithoutCharacterCapture() {
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument(null, [
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument(null, [
     createLorebookCapture(),
   ]);
 
-  assertEqual(documentValue.source.characterId, null, "standalone character id");
+  assertEqual(documentValue.source.character, null, "standalone character source");
   assertEqual(documentValue.form.basicInfo.name, "", "standalone name remains empty");
   assertEqual(documentValue.form.playbook.length, 2, "standalone playbook entries");
   assert(
@@ -180,7 +199,7 @@ function testLorebookCanExportWithoutCharacterCapture() {
 }
 
 function testCapturedLorebookSupplementsCachedCharacter() {
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument(
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument(
     {
       platform: "janitorai",
       kind: "network",
@@ -220,7 +239,7 @@ function testRecapturingScriptUpdatesInsteadOfDuplicating() {
     },
   ]);
 
-  const documentValue = globalThis.CreatorCardPorterJanitorAdapter.buildDocument(null, [
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument(null, [
     newest,
     createLorebookCapture(),
   ]);
@@ -237,9 +256,107 @@ function testRecapturingScriptUpdatesInsteadOfDuplicating() {
   );
 }
 
+function testV2SourcePreservesFieldsWithoutTargetMappings() {
+  const scriptCapture = createLorebookCapture();
+  scriptCapture.responseBody.priority = 7;
+  const entries = JSON.parse(scriptCapture.responseBody.script);
+  entries[0].placement = "before_character";
+  scriptCapture.responseBody.script = JSON.stringify(entries);
+
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument(
+    {
+      platform: "janitorai",
+      kind: "page-props",
+      resourceId: "char-source",
+      capturedAt: "2026-07-16T09:00:00.000Z",
+      responseBody: {
+        character: {
+          id: "char-source",
+          name: "Complete source",
+          personality: "Mapped persona",
+          experimentalSetting: { mode: "strict" },
+        },
+        imageUrl: "complete.webp",
+      },
+    },
+    [scriptCapture],
+  );
+
+  assertEqual(
+    documentValue.source.character.data.experimentalSetting,
+    { mode: "strict" },
+    "unmapped character fields should remain lossless in source",
+  );
+  assertEqual(
+    documentValue.source.character.data.imageUrl,
+    "complete.webp",
+    "page-level source image should join the complete character source",
+  );
+  assertEqual(
+    documentValue.source.scripts[0].data.priority,
+    7,
+    "unmapped script fields should remain lossless in source",
+  );
+  assert(
+    documentValue.unmapped.some(
+      (entry) =>
+        entry.sourceField ===
+        "source.character.data.experimentalSetting",
+    ),
+    "unmapped character fields should be inventoried",
+  );
+  assert(
+    documentValue.unmapped.some(
+      (entry) =>
+        entry.sourceField ===
+        "source.scripts[].data.script[].placement",
+    ),
+    "unmapped lorebook entry fields should be inventoried",
+  );
+}
+
+function testCurrentJanitorCharacterFields() {
+  const documentValue = globalThis.CreatorCardJanitorAdapter.buildDocument({
+    platform: "janitorai",
+    kind: "page-state",
+    resourceType: "character",
+    resourceId: "char-current-fields",
+    capturedAt: "2026-07-17T03:30:00.000Z",
+    responseBody: {
+      character: {
+        id: "char-current-fields",
+        name: "Current Janitor character",
+        personality: "Complete definition",
+        first_messages: ["Primary greeting", "Alternative greeting"],
+        custom_tags: ["Original", "Tok"],
+      },
+    },
+  });
+
+  assertEqual(
+    documentValue.form.characterSettings.greeting,
+    "Primary greeting",
+    "the current Janitor first_messages contract should map its first greeting",
+  );
+  assertEqual(
+    documentValue.form.basicInfo.tag,
+    ["Original", "Tok"],
+    "current Janitor custom tags should be mapped",
+  );
+  assert(
+    documentValue.unmapped.some(
+      (entry) =>
+        entry.sourceField === "source.character.data.first_messages[1..]",
+    ),
+    "alternative greetings should remain explicit in the mapping report",
+  );
+}
+
 testBuildDocumentMapsJanitorFields();
 testRequestBodyWinsWhenSaveResponseIsSparse();
 testSeparateLorebookCaptureMapsToPlaybook();
 testLorebookCanExportWithoutCharacterCapture();
 testCapturedLorebookSupplementsCachedCharacter();
 testRecapturingScriptUpdatesInsteadOfDuplicating();
+testV2SourcePreservesFieldsWithoutTargetMappings();
+testCurrentJanitorCharacterFields();

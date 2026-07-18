@@ -10,8 +10,8 @@
     <main class="shell">
       <header class="masthead">
         <div>
-          <p class="eyebrow">CARD PORTER / TRANSFER MANIFEST</p>
-          <h1>Character migrator</h1>
+          <p class="eyebrow">CREATOR TOOLS / CARD TRANSFER</p>
+          <h1>Creator Card Porter</h1>
         </div>
         <span id="capture-status" class="status status--idle">Waiting</span>
       </header>
@@ -20,9 +20,22 @@
         <label id="platform-label" for="platform">Source platform</label>
         <select id="platform">
           <option value="janitorai">JanitorAI</option>
-          <option disabled>More platforms coming</option>
+          <option value="other">Other (experimental)</option>
         </select>
       </section>
+
+      <aside id="platform-warning" class="platform-warning" aria-live="polite" hidden>
+        <span>Experimental capture</span>
+        <strong>Other recognizes common character-editor fields.</strong>
+        Custom editors may be missed or mapped incorrectly. Review Preview,
+        Mapping, and JSON before importing the file.
+      </aside>
+
+      <aside class="capture-disclosure" aria-label="Capture and storage notice">
+        <strong>Manual capture only.</strong>
+        When you click Capture current page, the extension reads creator fields
+        from that tab and stores them locally in this browser. Nothing is uploaded.
+      </aside>
 
       <section class="capture-actions" aria-label="Capture controls">
         <button id="capture-current" class="capture-action capture-action--primary" type="button">
@@ -33,14 +46,16 @@
         </button>
       </section>
 
+      <p id="capture-feedback" class="capture-feedback" role="status" hidden></p>
+
       <section id="empty-state" class="empty-state">
         <span class="empty-state__mark">↳</span>
         <div>
           <h2 id="empty-title">No character or lorebook captured yet</h2>
           <p id="empty-description">
             Open your character page or a linked Scripts edit page, let the fields
-            load, then reopen this extension. Each source is stored locally and
-            combined when their script IDs match.
+            load, then select Capture current page. Each source is stored locally
+            and combined when their script IDs match.
           </p>
         </div>
       </section>
@@ -54,21 +69,32 @@
         </div>
 
         <div class="tabs" role="tablist" aria-label="Export views">
-          <button class="tab is-active" type="button" data-tab="preview" role="tab" aria-selected="true">Preview</button>
-          <button class="tab" type="button" data-tab="json" role="tab" aria-selected="false">JSON</button>
+          <button id="preview-tab" class="tab is-active" type="button" data-tab="preview" role="tab" aria-controls="preview-panel" aria-selected="true">Preview</button>
+          <button id="mapping-tab" class="tab" type="button" data-tab="mapping" role="tab" aria-controls="mapping-panel" aria-selected="false">Mapping</button>
+          <button id="json-tab" class="tab" type="button" data-tab="json" role="tab" aria-controls="json-panel" aria-selected="false">JSON</button>
         </div>
 
-        <div id="preview-panel" class="panel" role="tabpanel">
+        <div id="preview-panel" class="panel" role="tabpanel" aria-labelledby="preview-tab">
+          <div id="source-preview"></div>
+        </div>
+
+        <div id="mapping-panel" class="panel" role="tabpanel" aria-labelledby="mapping-tab" hidden>
+          <aside class="mapping-disclosure">
+            <strong>Standard character information template</strong>
+            Mapping shows how captured source fields are translated into the
+            standard character information template used by the exported form.
+            It does not change the captured source.
+          </aside>
           <div class="manifest-heading">
             <span>Source field</span>
-            <span>the target platform field</span>
+            <span>Target field</span>
             <span>State</span>
           </div>
           <div id="mapping-list" class="mapping-list"></div>
           <div id="unmapped-note" class="unmapped-note" hidden></div>
         </div>
 
-        <div id="json-panel" class="panel" role="tabpanel" hidden>
+        <div id="json-panel" class="panel" role="tabpanel" aria-labelledby="json-tab" hidden>
           <pre id="json-output"></pre>
         </div>
       </section>
@@ -81,8 +107,13 @@
         <button id="copy" class="button button--secondary" type="button" disabled>Copy JSON</button>
         <button id="download" class="button button--primary" type="button" disabled>Download JSON</button>
       </footer>
+
+      <p class="policy-links">
+        <a href="../privacy/privacy.html" target="_blank" rel="noreferrer">Privacy &amp; data use</a>
+      </p>
     </main>
     <script src="../adapters/janitorai.js"></script>
+    <script src="../adapters/generic.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

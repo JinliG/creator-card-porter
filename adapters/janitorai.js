@@ -137,10 +137,30 @@
       : Array.isArray(character.tag_ids)
         ? character.tag_ids
         : [];
+    const customTags = Array.isArray(character.custom_tags)
+      ? character.custom_tags.map(stringValue).filter(Boolean)
+      : [];
     const names = tagIds
       .map((id) => TAG_MAP[Number(id)])
       .filter(Boolean);
-    return [...new Set([...tags, ...names])];
+    return [...new Set([...tags, ...customTags, ...names])];
+  };
+
+  const resolveFirstMessage = (character) => {
+    const alternatives = Array.isArray(character?.first_messages)
+      ? character.first_messages.map(stringValue).filter(Boolean)
+      : [];
+    return (
+      alternatives[0] ||
+      firstString(character, [
+        "firstMessage",
+        "first_message",
+        "initialMessage",
+        "initial_message",
+        "first_mes",
+        "greeting",
+      ])
+    );
   };
 
   const decodeHtmlEntities = (value) =>
@@ -209,6 +229,11 @@
     note,
   });
 
+  const sourceCharacterPaths = (keys) =>
+    keys.map((key) => `source.character.data.${key}`);
+  const sourceScriptPaths = (keys) =>
+    keys.map((key) => `source.scripts[].data.${key}`);
+
   const scriptCandidateScore = (record) => {
     if (!isRecord(record)) return 0;
     return (
@@ -263,6 +288,7 @@
     const merged = { ...(response || {}), ...(request || {}) };
     const id =
       firstString(merged, ["id", "scriptId", "script_id"]) ||
+      stringValue(capture?.resourceId) ||
       scriptIdFromUrl(capture?.url || capture?.sourcePageUrl || "");
     return { ...merged, id };
   };
@@ -386,6 +412,135 @@
     return [...byId.values()];
   };
 
+  const CHARACTER_CONSUMED_KEYS = new Set([
+    "id",
+    "characterId",
+    "character_id",
+    "name",
+    "chat_name",
+    "chatName",
+    "description",
+    "tagline",
+    "bio",
+    "personality",
+    "persona",
+    "definition",
+    "scenario",
+    "firstMessage",
+    "first_message",
+    "first_messages",
+    "initialMessage",
+    "initial_message",
+    "first_mes",
+    "greeting",
+    "exampleDialogs",
+    "example_dialogs",
+    "mes_example",
+    "imageUrl",
+    "image_url",
+    "avatarUrl",
+    "avatar_url",
+    "avatar",
+    "image",
+    "tags",
+    "tagIds",
+    "tag_ids",
+    "custom_tags",
+    "scripts",
+    "script",
+    "scriptId",
+    "script_id",
+  ]);
+  const SCRIPT_CONSUMED_KEYS = new Set([
+    "id",
+    "scriptId",
+    "script_id",
+    "title",
+    "name",
+    "script",
+    "type",
+  ]);
+  const SCRIPT_ENTRY_CONSUMED_KEYS = new Set([
+    "id",
+    "name",
+    "title",
+    "comment",
+    "key",
+    "keys",
+    "keywords",
+    "keysRaw",
+    "content",
+    "body",
+    "text",
+    "enabled",
+    "constant",
+    "alwaysActive",
+    "always_active",
+  ]);
+
+  const sourceValueType = (value) => {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    return typeof value;
+  };
+
+  const collectUnmappedSourceFields = (character, scripts) => {
+    const fields = new Map();
+    const add = (sourceField, value) => {
+      if (fields.has(sourceField)) return;
+      fields.set(sourceField, {
+        sourceField,
+        reason:
+          "Preserved in source, but no verified target form mapping is defined.",
+        valueType: sourceValueType(value),
+      });
+    };
+
+    if (isRecord(character)) {
+      Object.entries(character).forEach(([key, value]) => {
+        if (!CHARACTER_CONSUMED_KEYS.has(key)) {
+          add(`source.character.data.${key}`, value);
+        }
+      });
+    }
+
+    scripts.forEach((script) => {
+      Object.entries(script).forEach(([key, value]) => {
+        if (!SCRIPT_CONSUMED_KEYS.has(key)) {
+          add(`source.scripts[].data.${key}`, value);
+        }
+      });
+      scriptEntries(script).forEach((entry) => {
+        Object.entries(entry).forEach(([key, value]) => {
+          if (!SCRIPT_ENTRY_CONSUMED_KEYS.has(key)) {
+            add(`source.scripts[].data.script[].${key}`, value);
+          }
+        });
+      });
+    });
+
+    return [...fields.values()];
+  };
+
+  const sourceCapture = (capture, resourceId, data) => ({
+    resourceId: resourceId || null,
+    capturedAt: capture?.capturedAt || new Date().toISOString(),
+    captureKind: capture?.kind || "unknown",
+    data,
+  });
+
+  const completeCharacterSource = (capture, character) => {
+    const data = { ...character };
+    if (
+      data.imageUrl == null &&
+      isRecord(capture?.responseBody) &&
+      capture.responseBody.imageUrl != null
+    ) {
+      data.imageUrl = capture.responseBody.imageUrl;
+    }
+    return data;
+  };
+
   const characterMappings = ({
     name,
     description,
@@ -396,19 +551,19 @@
     scenario,
     firstMessage,
   }) => [
-    mappingEntry("basicInfo.name", ["name"], name ? "mapped" : "missing", "Direct field mapping."),
-    mappingEntry("basicInfo.attributes", [], "missing", "the target platform attributes are platform-defined and must be selected after import."),
-    mappingEntry("basicInfo.imageUrl", ["imageUrl", "avatar"], imageUrl ? "derived" : "missing", "Resolves relative filenames against the JanitorAI avatar CDN."),
-    mappingEntry("basicInfo.avatarUrl", ["imageUrl", "avatar"], imageUrl ? "derived" : "missing", "Reuses the resolved source image as the initial square avatar."),
-    mappingEntry("basicInfo.hook", ["description"], description ? "derived" : "missing", "Strips rich HTML from the public description and uses its opening text."),
-    mappingEntry("basicInfo.tag", ["tags", "tagIds"], tags.length ? "mapped" : "missing", "Converts JanitorAI tag IDs to readable tag names."),
-    mappingEntry("basicInfo.bio", ["description"], description ? "mapped" : "missing", "Maps the public character description to the the target platform bio."),
-    mappingEntry("basicInfo.creatorNote.title", [], "missing", "JanitorAI has no equivalent the target platform creator-note title."),
-    mappingEntry("basicInfo.creatorNote.content", [], "missing", "JanitorAI has no equivalent the target platform creator-note content."),
-    mappingEntry("characterSettings.persona", ["personality", "exampleDialogs"], persona ? (exampleDialogs ? "derived" : "mapped") : "missing", exampleDialogs ? "Appends example dialogs inside an <example_dialogs> block." : "Maps the character definition to Persona."),
-    mappingEntry("characterSettings.memorySeed", ["scenario"], scenario ? "mapped" : "missing", "Maps the starting situation to Memory Seed."),
+    mappingEntry("basicInfo.name", sourceCharacterPaths(["name", "chat_name", "chatName"]), name ? "mapped" : "missing", "Direct field mapping."),
+    mappingEntry("basicInfo.attributes", [], "missing", "Target attributes are platform-defined and must be selected after import."),
+    mappingEntry("basicInfo.imageUrl", sourceCharacterPaths(["imageUrl", "image_url", "avatarUrl", "avatar_url", "avatar", "image"]), imageUrl ? "derived" : "missing", "Resolves relative filenames against the JanitorAI avatar CDN."),
+    mappingEntry("basicInfo.avatarUrl", sourceCharacterPaths(["imageUrl", "image_url", "avatarUrl", "avatar_url", "avatar", "image"]), imageUrl ? "derived" : "missing", "Reuses the resolved source image as the initial square avatar."),
+    mappingEntry("basicInfo.hook", sourceCharacterPaths(["description", "tagline", "bio"]), description ? "derived" : "missing", "Strips rich HTML from the public description and uses its opening text."),
+    mappingEntry("basicInfo.tag", sourceCharacterPaths(["tags", "tagIds", "tag_ids", "custom_tags"]), tags.length ? "mapped" : "missing", "Converts JanitorAI tags and custom tags to readable names."),
+    mappingEntry("basicInfo.bio", sourceCharacterPaths(["description", "tagline", "bio"]), description ? "mapped" : "missing", "Maps the public character description to the target bio."),
+    mappingEntry("basicInfo.creatorNote.title", [], "missing", "JanitorAI has no equivalent target creator-note title."),
+    mappingEntry("basicInfo.creatorNote.content", [], "missing", "JanitorAI has no equivalent target creator-note content."),
+    mappingEntry("characterSettings.persona", sourceCharacterPaths(["personality", "persona", "definition", "exampleDialogs", "example_dialogs", "mes_example"]), persona ? (exampleDialogs ? "derived" : "mapped") : "missing", exampleDialogs ? "Appends example dialogs inside an <example_dialogs> block." : "Maps the character definition to Persona."),
+    mappingEntry("characterSettings.memorySeed", sourceCharacterPaths(["scenario"]), scenario ? "mapped" : "missing", "Maps the starting situation to Memory Seed."),
     mappingEntry("characterSettings.prologue", [], "missing", "JanitorAI has no non-prompt visual prologue equivalent."),
-    mappingEntry("characterSettings.greeting", ["firstMessage"], firstMessage ? "mapped" : "missing", "Maps the first message to Greeting."),
+    mappingEntry("characterSettings.greeting", sourceCharacterPaths(["first_messages", "firstMessage", "first_message", "initialMessage", "initial_message", "first_mes", "greeting"]), firstMessage ? "mapped" : "missing", "Maps the first available initial message to Greeting."),
   ];
 
   const buildDocument = (capture, scriptCaptures = []) => {
@@ -431,14 +586,7 @@
       "definition",
     ]);
     const scenario = firstString(character, ["scenario"]);
-    const firstMessage = firstString(character, [
-      "firstMessage",
-      "first_message",
-      "initialMessage",
-      "initial_message",
-      "first_mes",
-      "greeting",
-    ]);
+    const firstMessage = resolveFirstMessage(character);
     const exampleDialogs = firstString(character, [
       "exampleDialogs",
       "example_dialogs",
@@ -457,11 +605,24 @@
     const tags = resolveTags(character);
     const hook = deriveHook(description);
     const persona = combinePersona(personality, exampleDialogs);
-    const characterId = firstString(character, [
-      "id",
-      "characterId",
-      "character_id",
-    ]);
+    const characterId =
+      firstString(character, ["id", "characterId", "character_id"]) ||
+      stringValue(capture?.resourceId);
+    const sourceCharacterData = character
+      ? completeCharacterSource(capture, character)
+      : null;
+    const sourceScripts = scriptCaptures.flatMap((scriptCapture) => {
+      const script = resolveScript(scriptCapture);
+      if (!script) return [];
+      return [
+        sourceCapture(
+          scriptCapture,
+          firstString(script, ["id", "scriptId", "script_id"]) ||
+            stringValue(scriptCapture?.resourceId),
+          script,
+        ),
+      ];
+    });
     const references = referencedScriptIds(character);
     const mappings = character
       ? characterMappings({
@@ -478,11 +639,11 @@
     mappings.push(
       mappingEntry(
         "playbook",
-        ["scripts[].script"],
+        sourceScriptPaths(["script"]),
         playbook.length ? "derived" : "missing",
         playbook.length
-          ? "Converts JanitorAI lorebook entries into the target platform Playbook items; keywords become natural-language trigger conditions and constant entries become Always On reminders."
-          : "Open the linked JanitorAI Scripts edit page and reload it once to capture its lorebook entries.",
+          ? "Converts JanitorAI lorebook entries into target Playbook items; keywords become natural-language trigger conditions and constant entries become Always On reminders."
+          : "Open the linked JanitorAI Scripts edit page and use Capture current page to add its lorebook entries.",
       ),
     );
 
@@ -496,34 +657,55 @@
       : 0;
     if (missingReferenceCount > 0) {
       unmapped.push({
-        sourceField: "scripts",
+        sourceField: "source.character.data.scripts",
         reason: `${missingReferenceCount} linked JanitorAI script(s) have not been captured yet. Open each Scripts edit page and capture it once.`,
         valueType: "array",
       });
     }
     if (parsedEntries > playbook.length) {
       unmapped.push({
-        sourceField: "scripts[].script",
-        reason: `${parsedEntries - playbook.length} lorebook entries were skipped because they were empty or exceeded the target platform's 30-item Playbook limit.`,
+        sourceField: "source.scripts[].data.script",
+        reason: `${parsedEntries - playbook.length} lorebook entries were skipped because they were empty or exceeded the 30-item Playbook limit.`,
         valueType: "array",
       });
     }
+    if (Array.isArray(character?.first_messages)) {
+      const alternativeCount = character.first_messages
+        .map(stringValue)
+        .filter(Boolean).length;
+      if (alternativeCount > 1) {
+        unmapped.push({
+          sourceField: "source.character.data.first_messages[1..]",
+          reason: `${alternativeCount - 1} alternative initial message(s) are preserved in source; the standard template currently imports the first one as Greeting.`,
+          valueType: "array",
+        });
+      }
+    }
+    unmapped.push(
+      ...collectUnmappedSourceFields(
+        sourceCharacterData,
+        sourceScripts.map((source) => source.data),
+      ),
+    );
+
+    const captureKind = character
+      ? selectedScripts.length
+        ? `${capture.kind || "unknown"}+script`
+        : capture.kind || "unknown"
+      : `script-${primaryCapture?.kind || "unknown"}`;
 
     return {
       schema: "creator-card-porter.character-form-source",
-      version: 1,
+      version: 2,
       source: {
         platform: "janitorai",
-        characterId: characterId || null,
-        characterUrl: primaryCapture?.sourcePageUrl || primaryCapture?.url || null,
         capturedAt: primaryCapture?.capturedAt || new Date().toISOString(),
-        captureKind: character
-          ? selectedScripts.length
-            ? `${capture.kind || "network"}+script`
-            : capture.kind || "network"
-          : `script-${primaryCapture?.kind || "network"}`,
-        requestUrl: primaryCapture?.url || null,
-        requestMethod: primaryCapture?.method || null,
+        captureKind,
+        character:
+          sourceCharacterData && capture
+            ? sourceCapture(capture, characterId, sourceCharacterData)
+            : null,
+        scripts: sourceScripts,
       },
       form: {
         basicInfo: {
@@ -549,7 +731,7 @@
     };
   };
 
-  globalThis.CreatorCardPorterJanitorAdapter = {
+  globalThis.CreatorCardJanitorAdapter = {
     id: "janitorai",
     label: "JanitorAI",
     buildDocument,
