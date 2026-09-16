@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Creator Card Porter — Demo</title>
+
+  <!--
+    Demo animation for Creator Card Porter (README GIF).
+    Storyboard (17s):
+      0.0–2.5   Mock JanitorAI character page (fictional character "Aveline")
+      2.5–3.4   Cursor arcs to toolbar extension icon, click
+      3.45–4.7  Popup springs open; camera zooms toward it
+      5.25      Click Capture current page → status green, Preview rows stagger in
+      7.35      Click Mapping tab → mapping rows stagger in
+      9.5       Click JSON tab → JSON chunk-reveal
+      12.5      Click Download JSON → export toast slides up
+      14.6–15.3 Scene collapses; end card (real logo) springs in
+      15.3–17   Hold end card; hard stop (GIF loops)
+    Brand spec: demo/brand-spec.md (colors/fonts lifted from popup/popup.css)
+  -->
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg: #111016;
+      --panel: #1c1a22;
+      --panel-deep: #17151b;
+      --ink: #f7f5fb;
+      --ink-2: #aa9fb1;
+      --ink-3: #817986;
+      --accent: #e8548f;
+      --success: #7be0b4;
+      --warning: #f3c969;
+      --border: #3b3744;
+      --border-2: #302d37;
+      --font-ui: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { background: #000; font-family: var(--font-ui); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- ── animations.jsx engine (inlined; contains JSX → must be text/babel) ── -->
+  <script type="text/babel">
+  (function() {
+    const { createContext, useContext, useState, useEffect, useRef, useCallback } = React;
+
+    const TimeContext = createContext({ time: 0, duration: 10, playing: false });
+    const SpriteContext = createContext(null);
+
+    const Easing = {
+      linear: t => t,
+      easeIn: t => t * t,
+      easeOut: t => 1 - (1 - t) * (1 - t),
+      easeInOut: t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+      expoOut: t => t === 1 ? 1 : 1 - Math.pow(2, -10 * t),
+      overshoot: t => {
+        const c1 = 1.70158, c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+      },
+      spring: t => {
+        const c = (2 * Math.PI) / 3;
+        return t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c) + 1;
+      },
+    };
+
+    function interpolate(t, input, output, easing) {
+      const [inStart, inEnd] = input;
+      const [outStart, outEnd] = output;
+      if (t <= inStart) return outStart;
+      if (t >= inEnd) return outEnd;
+      let progress = (t - inStart) / (inEnd - inStart);
+      if (easing) progress = easing(progress);
+      return outStart + (outEnd - outStart) * progress;
+    }
+
+    function useTime() { return useContext(TimeContext).time; }
+
+    const stageStyles = {
+      wrapper: { position: 'fixed', inset: 0, background: '#000', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, sans-serif' },
+      stageHolder: { flex: 1, position: 'relative', overflow: 'hidden' },
+      canvas: { position: 'absolute', top: '50%', left: '50%', transformOrigin: 'center center', background: '#111', overflow: 'hidden' },
+      controls: { position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(10px)', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 16, color: '#fff', fontSize: 12, zIndex: 100 },
+      button: { background: 'none', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', padding: '6px 14px', borderRadius: 4, cursor: 'pointer', fontSize: 12 },
+      timeDisplay: { fontFamily: 'ui-monospace, monospace', fontVariantNumeric: 'tabular-nums', minWidth: 90 },
+      scrubber: { flex: 1, height: 4, background: 'rgba(255,255,255,0.2)', borderRadius: 2, position: 'relative', cursor: 'pointer' },
+      scrubberFill: { position: 'absolute', top: 0, left: 0, height: '100%', background: '#fff', borderRadius: 2, pointerEvents: 'none' },
+      scrubberHandle: { position: 'absolute', top: '50%', width: 12, height: 12, background: '#fff', borderRadius: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' },
+    };
+
+    function Stage({ duration = 10, width = 1920, height = 1080, loop = true, children, bgColor = '#fff' }) {
+      const [time, setTime] = useState(0);
+      const [playing, setPlaying] = useState(true);
+      const [scale, setScale] = useState(1);
+      const rafRef = useRef(null);
+
+      const effectiveLoop = (typeof window !== 'undefined' && window.__recording) ? false : loop;
+
+      useEffect(() => {
+        function updateScale() {
+          const vw = window.innerWidth;
+          const vh = window.innerHeight - 56;
+          const s = Math.min(vw / width, vh / height);
+          setScale(s);
+        }
+        updateScale();
+        window.addEventListener('resize', updateScale);
+        return () => window.removeEventListener('resize', updateScale);
+      }, [width, height]);
+
+      useEffect(() => {
+        if (!playing) return;
+        let cancelled = false;
+        let last = null;
+        function tick(now) {
+          if (cancelled) return;
+          if (last === null) {
+            last = now;
+            if (typeof window !== 'undefined') window.__ready = true;
+          }
+          const delta = (now - last) / 1000;
+          last = now;
+          setTime(prev => {
+            const next = prev + delta;
+            if (next >= duration) return effectiveLoop ? 0 : duration - 0.001;
+            return next;
+          });
+          rafRef.current = requestAnimationFrame(tick);
+        }
+        const startAfterFonts = () => {
+          if (cancelled) return;
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(startAfterFonts);
+        } else {
+          startAfterFonts();
+        }
+        return () => { cancelled = true; cancelAnimationFrame(rafRef.current); };
+      }, [playing, duration, effectiveLoop]);
+
+      const handleScrub = useCallback((e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const ratio = (e.clientX - rect.left) / rect.width;
+        setTime(Math.max(0, Math.min(duration, ratio * duration)));
+      }, [duration]);
+      const handleSeek = useCallback((e) => { handleScrub(e); setPlaying(false); }, [handleScrub]);
+
+      const progress = time / duration;
+      const ctx = { time, duration, playing, setPlaying, setTime };
+      const canvasStyle = { ...stageStyles.canvas, width, height, background: bgColor, transform: `translate(-50%, -50%) scale(${scale})` };
+
+      return (
+        <TimeContext.Provider value={ctx}>
+          <div style={stageStyles.wrapper}>
+            <div style={stageStyles.stageHolder}>
+              <div style={canvasStyle}>{children}</div>
+            </div>
+            <div style={stageStyles.controls}>
+              <button style={stageStyles.button} onClick={() => setPlaying(p => !p)}>{playing ? '⏸ 暂停' : '▶ 播放'}</button>
+              <button style={stageStyles.button} onClick={() => setTime(0)}>⏮ 开始</button>
+              <div style={stageStyles.timeDisplay}>{time.toFixed(2)}s / {duration.toFixed(2)}s</div>
+              <div style={stageStyles.scrubber} onMouseDown={handleSeek}>
+                <div style={{ ...stageStyles.scrubberFill, width: `${progress * 100}%` }} />
+                <div style={{ ...stageStyles.scrubberHandle, left: `${progress * 100}%` }} />
+              </div>
+            </div>
+          </div>
+        </TimeContext.Provider>
+      );
+    }
+
+    if (typeof window !== 'undefined') {
+      window.Animations = { Stage, useTime, Easing, interpolate };
+    }
+  })();
+  </script>
+
+  <!-- ── demo scene ────────────────────────────────────────────────────── -->
+  <script type="text/babel">
+    const { Stage, useTime, Easing, interpolate } = window.Animations;
+
+    const DURATION = 17;
+    const ICON = '../icons/icon128.png';
+
+    // ── timeline constants ──────────────────────────────────────────────
+    const T = {
+      pageIn:    [0.1, 0.9],
+      popupOpen: 3.45,
+      zoom:      [3.9, 4.7],
+      capture:   5.25,
+      captured:  5.55,
+      previewIn: 5.65,
+      tabMapping: 7.35,
+      mappingIn: 7.55,
+      tabJson:   9.5,
+      jsonIn:    [9.75, 12.0],
+      download:  12.5,
+      toast:     12.75,
+      collapse:  [14.6, 15.3],
+      endcard:   15.0,
+    };
+    const CLICKS = [3.38, T.capture, T.tabMapping, T.tabJson, T.download];
+
+    // ── cursor path (canvas coords) ─────────────────────────────────────
+    const CURSOR_PATH = [
+      { t: 0.0,  x: 820,  y: 660 },
+      { t: 2.5,  x: 820,  y: 660 },
+      { t: 3.32, x: 1645, y: 133, curve: -140 },  // extension icon
+      { t: 4.6,  x: 1645, y: 133 },
+      { t: 5.2,  x: 1326, y: 405, curve: 90 },    // Capture button
+      { t: 6.9,  x: 1326, y: 405 },
+      { t: 7.3,  x: 1418, y: 506, curve: 40 },    // Mapping tab
+      { t: 9.05, x: 1418, y: 506 },
+      { t: 9.45, x: 1572, y: 506, curve: 30 },    // JSON tab
+      { t: 12.05, x: 1572, y: 506 },
+      { t: 12.45, x: 1507, y: 878, curve: 50 },   // Download JSON
+      { t: 14.4, x: 1507, y: 878 },
+    ];
+
+    function bezierQuad(p0, pc, p1, u) {
+      const x = (1-u)*(1-u)*p0[0] + 2*(1-u)*u*pc[0] + u*u*p1[0];
+      const y = (1-u)*(1-u)*p0[1] + 2*(1-u)*u*pc[1] + u*u*p1[1];
+      return [x, y];
+    }
+
+    function cursorPos(t) {
+      let i = 0;
+      for (let k = 0; k < CURSOR_PATH.length - 1; k++) {
+        if (t >= CURSOR_PATH[k].t && t <= CURSOR_PATH[k+1].t) { i = k; break; }
+        if (t > CURSOR_PATH[CURSOR_PATH.length-1].t) { i = CURSOR_PATH.length - 2; break; }
+      }
+      const a = CURSOR_PATH[i], b = CURSOR_PATH[i+1];
+      const span = b.t - a.t;
+      let x = b.x, y = b.y;
+      if (span > 0) {
+        const u = Easing.easeInOut(Math.min(1, Math.max(0, (t - a.t) / span)));
+        const cp = [(a.x + b.x) / 2, (a.y + b.y) / 2 + (b.curve || 0)];
+        [x, y] = bezierQuad([a.x, a.y], cp, [b.x, b.y], u);
+      }
+      const jx = Math.sin(t * 13.7) * 1.4 + Math.sin(t * 7.3) * 0.8;
+      const jy = Math.cos(t * 11.3) * 1.4 + Math.cos(t * 6.1) * 0.8;
+      return [x + jx, y + jy];
+    }
+
+    // ── shared bits ─────────────────────────────────────────────────────
+    function CursorArrow({ size = 30 }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: 'block', filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))' }}>
+          <path d="M5 2 L5 20.5 L9.6 16.4 L12.4 22.4 L15 21.2 L12.2 15.3 L18.8 14.7 Z"
+                fill="#ffffff" stroke="#111016" strokeWidth="1.3" strokeLinejoin="round" />
+        </svg>
+      );
+    }
+
+    function ClickRings({ t }) {
+      return (
+        <React.Fragment>
+          {CLICKS.map(ct => {
+            if (t < ct || t > ct + 0.5) return null;
+            const p = (t - ct) / 0.5;
+            const [x, y] = cursorPos(ct);
+            return (
+              <div key={ct} style={{
+                position: 'absolute', left: x, top: y,
+                width: 14 + p * 44, height: 14 + p * 44,
+                border: '2.5px solid rgba(232,84,143,' + (0.75 * (1 - p)) + ')',
+                borderRadius: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+              }} />
+            );
+          })}
+        </React.Fragment>
+      );
+    }
+
+    // ── mock JanitorAI character page (fictional content) ───────────────
+    const pageStyles = {
+      nav: { height: 62, display: 'flex', alignItems: 'center', padding: '0 40px', gap: 34, borderBottom: '1px solid #211f29', background: '#121118' },
+      navBrand: { fontSize: 21, fontWeight: 800, letterSpacing: '-0.02em', color: '#f7f5fb' },
+      navLink: { fontSize: 14, color: '#9a93a8', fontWeight: 500 },
+      hero: { display: 'flex', gap: 36, padding: '42px 48px 30px' },
+      avatar: {
+        width: 176, height: 220, borderRadius: 18, flexShrink: 0,
+        background: 'linear-gradient(150deg, #7b5cd6 0%, #e8548f 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 76, fontWeight: 800, color: 'rgba(255,255,255,0.92)',
+        boxShadow: '0 18px 48px rgba(232,84,143,0.25)',
+      },
+      name: { fontSize: 46, fontWeight: 800, letterSpacing: '-0.03em', color: '#f7f5fb', lineHeight: 1.05 },
+      sub: { marginTop: 8, fontSize: 17, color: '#9a93a8' },
+      chip: { padding: '6px 14px', border: '1px solid #3b3744', borderRadius: 999, fontSize: 13.5, color: '#c9c2cf', fontWeight: 500 },
+      chatBtn: {
+        marginTop: 22, display: 'inline-flex', alignItems: 'center', gap: 10,
+        padding: '13px 28px', borderRadius: 12,
+        background: '#e8548f', color: '#160c12', fontSize: 16, fontWeight: 700,
+      },
+      cards: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, padding: '6px 48px 0' },
+      card: { background: '#15141b', border: '1px solid #26252e', borderRadius: 16, padding: '22px 22px 24px' },
+      cardHead: { fontFamily: 'var(--font-mono)', fontSize: 12, letterSpacing: '0.14em', textTransform: 'uppercase', color: '#817986', marginBottom: 12 },
+      cardBody: { fontSize: 16.5, lineHeight: 1.62, color: '#d9d4e0', whiteSpace: 'pre-line' },
+    };
+
+    function JanitorPage() {
+      return (
+        <div style={{ position: 'absolute', inset: 0, background: '#0e0d13' }}>
+          <div style={pageStyles.nav}>
+            <span style={pageStyles.navBrand}>JanitorAI</span>
+            <span style={pageStyles.navLink}>Browse</span>
+            <span style={pageStyles.navLink}>Chats</span>
+            <span style={pageStyles.navLink}>Create</span>
+            <div style={{ flex: 1 }} />
+            <div style={{ width: 210, height: 34, borderRadius: 999, border: '1px solid #33313d', background: '#18171f', display: 'flex', alignItems: 'center', padding: '0 16px', fontSize: 13, color: '#6f6879' }}>Search characters…</div>
+            <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(140deg,#3d3652,#241f33)', border: '1px solid #3b3744' }} />
+          </div>
+
+          <div style={pageStyles.hero}>
+            <div style={pageStyles.avatar}>A</div>
+            <div>
+              <div style={pageStyles.name}>Aveline</div>
+              <div style={pageStyles.sub}>The Lighthouse Keeper · by @greyworks</div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <span style={pageStyles.chip}>Fantasy</span>
+                <span style={pageStyles.chip}>Slow Burn</span>
+                <span style={pageStyles.chip}>OC</span>
+                <span style={pageStyles.chip}>Storm</span>
+              </div>
+              <div style={{ marginTop: 14, fontSize: 14, color: '#7d7589', fontFamily: 'var(--font-mono)' }}>2.1k likes · 12.4k chats · updated 3d ago</div>
+              <div style={pageStyles.chatBtn}>Chat with Aveline</div>
+            </div>
+          </div>
+
+          <div style={pageStyles.cards}>
+            <div style={pageStyles.card}>
+              <div style={pageStyles.cardHead}>Personality</div>
+              <div style={pageStyles.cardBody}>Reserved and observant. Keeps meticulous logbooks of every storm. Slow to trust — fierce once she does. Hates unfinished sentences.</div>
+            </div>
+            <div style={pageStyles.card}>
+              <div style={pageStyles.cardHead}>Scenario</div>
+              <div style={pageStyles.cardBody}>A storm has driven your ship onto the rocks of the Grey Coast. The lighthouse lamp still burns — someone is up there.</div>
+            </div>
+            <div style={pageStyles.card}>
+              <div style={pageStyles.cardHead}>First Message</div>
+              <div style={pageStyles.cardBody}>“The lamp doesn’t lie, sailor.” She lowers the lantern, studying you. “You’re the first thing the sea has given back in years.”</div>
+            </div>
+          </div>
+
+          <div style={{ padding: '20px 48px 0', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div style={{ ...pageStyles.card, opacity: 0.55 }}>
+              <div style={pageStyles.cardHead}>Example Dialogs</div>
+              <div style={pageStyles.cardBody}>{'{{char}}: “Mark it in the log or it didn’t happen.”\n{{user}}: “It was only a wave.”\n{{char}}: “It’s always only a wave.”'}</div>
+            </div>
+            <div style={{ ...pageStyles.card, opacity: 0.55 }}>
+              <div style={pageStyles.cardHead}>Creator’s Note</div>
+              <div style={pageStyles.cardBody}>She knows the coast better than the admiralty charts do. Let her be right about the small things.</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── browser chrome (dark) ───────────────────────────────────────────
+    function BrowserFrame() {
+      const light = (c) => ({ width: 13, height: 13, borderRadius: '50%', background: c, border: '0.5px solid rgba(0,0,0,0.2)' });
+      return (
+        <div style={{
+          position: 'absolute', left: 210, top: 42, width: 1500,
+          borderRadius: 14, overflow: 'hidden',
+          boxShadow: '0 40px 110px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
+          background: '#0e0d13',
+        }}>
+          {/* tab strip */}
+          <div style={{ height: 42, background: '#15161c', display: 'flex', alignItems: 'flex-end', padding: '0 14px', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingBottom: 14, marginRight: 6 }}>
+              <div style={light('#ff5f57')} /><div style={light('#febc2e')} /><div style={light('#28c840')} />
+            </div>
+            <div style={{
+              background: '#26272f', padding: '9px 18px', borderTopLeftRadius: 10, borderTopRightRadius: 10,
+              fontSize: 13.5, color: '#d8d4de', display: 'flex', alignItems: 'center', gap: 9, maxWidth: 300,
+            }}>
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: 'linear-gradient(140deg,#7b5cd6,#e8548f)', flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Aveline, the Lighthouse Keeper | JanitorAI</span>
+            </div>
+          </div>
+          {/* nav bar */}
+          <div style={{ height: 54, background: '#26272f', display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" style={{ color: '#8f8a9b' }}><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" style={{ color: '#55505f' }}><path d="M9 5 L16 12 L9 19" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" style={{ color: '#8f8a9b', marginRight: 4 }}><path d="M20 12 A8 8 0 1 1 17.7 6.3 M20 4 L20 9 L15 9" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <div style={{
+              flex: 1, height: 36, borderRadius: 999, background: '#15161c', border: '1px solid #35343f',
+              display: 'flex', alignItems: 'center', gap: 9, padding: '0 16px',
+              fontSize: 14, color: '#b6b0c0', fontFamily: 'var(--font-mono)',
+            }}>
+              <svg width="12" height="14" viewBox="0 0 12 14" style={{ color: '#7d7789', flexShrink: 0 }}><rect x="1" y="6" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4"/><path d="M3.5 6 V4.5 a2.5 2.5 0 0 1 5 0 V6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>
+              janitorai.com/characters/4821-aveline-the-lighthouse-keeper
+            </div>
+            <svg width="20" height="20" viewBox="0 0 24 24" style={{ color: '#8f8a9b', marginLeft: 6 }}><path d="M10 4 h4 v4 h4 v4 h-4 v4 h4 v4 h-4 v-4 h-4 v4 H6 v-4 H2 v-4 h4 V8 H2 V4 h4 V0 h4 Z" fill="currentColor" opacity="0.9" transform="scale(0.9) translate(1.3,1.3)"/></svg>
+            <img src={ICON} alt="Creator Card Porter" style={{ width: 26, height: 26, borderRadius: 6, marginLeft: 4 }} />
+          </div>
+          {/* page content */}
+          <div style={{ position: 'relative', height: 880 }}>
+            <JanitorPage />
+          </div>
+        </div>
+      );
+    }
+
+    // ── popup: faithful recreation of popup/popup.html + popup.css ──────
+    // Base geometry 420 wide; rendered at scale POPUP_SCALE from top-right origin.
+    const POPUP_SCALE = 1.2;
+    const POPUP_TOP = 116, POPUP_RIGHT = 250;
+
+    const PREVIEW_ROWS = [
+      ['name', 'Aveline'],
+      ['tags', 'Fantasy · Slow Burn · OC'],
+      ['description', 'A keeper of the last lighthouse on the Grey Coast…'],
+      ['personality', 'Reserved and observant. Keeps meticulous logbooks…'],
+      ['scenario', 'A storm has driven your ship onto the rocks…'],
+      ['firstMessage', '“The lamp doesn’t lie, sailor.” She lowers the lantern…'],
+    ];
+
+    const MAPPING_ROWS = [
+      ['source.character.data.name', 'basicInfo.name', 'mapped'],
+      ['source.character.data.description', 'basicInfo.bio', 'mapped'],
+      ['source.character.data.avatar', 'basicInfo.imageUrl', 'mapped'],
+      ['source.character.data.personality', 'characterSettings.persona', 'mapped'],
+      ['source.character.data.exampleDialogs', 'persona → <example_dialogs>', 'derived'],
+      ['source.character.data.scenario', 'characterSettings.memorySeed', 'mapped'],
+      ['source.character.data.firstMessage', 'characterSettings.greeting', 'mapped'],
+    ];
+
+    const JSON_TEXT = `{
+  "$schema": "creator-card-porter.character-form-source",
+  "version": 2,
+  "source": {
+    "character": {
+      "platform": "janitorai",
+      "id": "4821",
+      "data": { "name": "Aveline", "tags": ["Fantasy", …] }
+    }
+  },
+  "form": {
+    "basicInfo": {
+      "name": "Aveline",
+      "tag": ["Fantasy", "Slow Burn", "OC"]
+    },
+    "characterSettings": {
+      "persona": "Reserved and observant…",
+      "greeting": "\\"The lamp doesn't lie, sailor.…\\"",
+      "memorySeed": "A storm has driven your ship…"
+    }
+  },
+  "mapping": {
+    "basicInfo.name": "source.character.data.name",
+    …
+  }
+}`;
+
+    const popupStyles = {
+      shell: {
+        width: 420, minHeight: 560, display: 'flex', flexDirection: 'column',
+        padding: 14, borderRadius: 14,
+        background: 'linear-gradient(180deg, rgba(232,84,143,0.08), transparent 120px), #111016',
+        border: '1px solid #35323e',
+        boxShadow: '0 30px 80px rgba(0,0,0,0.6)',
+        color: '#f7f5fb', fontFamily: 'var(--font-ui)',
+        overflow: 'hidden',
+      },
+      eyebrow: { margin: '0 0 5px', color: '#aa9fb1', fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.12em' },
+      h1: { margin: 0, fontSize: 21, fontWeight: 650, letterSpacing: '-0.03em' },
+      pill: (kind) => ({
+        display: 'inline-flex', alignItems: 'center', minHeight: 24, padding: '4px 10px',
+        borderRadius: 999, fontSize: 11,
+        border: kind === 'ready' ? '1px solid rgba(123,224,180,0.45)' : '1px solid #4a4653',
+        background: kind === 'ready' ? 'rgba(123,224,180,0.09)' : 'transparent',
+        color: kind === 'ready' ? '#7be0b4' : '#bdb6c5',
+      }),
+      disclosure: {
+        marginTop: 10, padding: '9px 11px', border: '1px solid rgba(123,224,180,0.24)',
+        borderRadius: 9, background: 'rgba(123,224,180,0.05)', color: '#aaa2b1', fontSize: 10, lineHeight: 1.5,
+      },
+      captureBtn: (pressed) => ({
+        minHeight: 34, border: '1px solid rgba(232,84,143,0.7)', borderRadius: 9,
+        background: '#1c1a22', color: '#ff9cc1', fontSize: 11, fontWeight: 600,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transform: pressed ? 'scale(0.95)' : 'scale(1)',
+      }),
+      ghostBtn: {
+        minHeight: 34, border: '1px solid #3b3744', borderRadius: 9,
+        background: '#1c1a22', color: '#d9d3de', fontSize: 11, fontWeight: 600,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      },
+      tab: (active) => ({
+        borderRadius: 8, background: active ? '#2b2732' : 'transparent',
+        color: active ? '#ffffff' : '#a79fac', padding: '7px 0', fontSize: 11, textAlign: 'center', fontWeight: active ? 600 : 400,
+      }),
+      fieldRow: (op, ty) => ({
+        display: 'grid', gridTemplateColumns: 'minmax(88px, 0.7fr) minmax(0, 1.6fr)', gap: 10,
+        padding: '6px 0', borderTop: '1px solid #25222b',
+        opacity: op, transform: `translateY(${ty}px)`,
+      }),
+      statePill: (kind) => ({
+        justifySelf: 'end', padding: '3px 7px', borderRadius: 999, fontSize: 9, textTransform: 'uppercase',
+        background: kind === 'mapped' ? 'rgba(123,224,180,0.09)' : 'rgba(232,84,143,0.1)',
+        color: kind === 'mapped' ? '#7be0b4' : '#ff8eb9',
+      }),
+      footerPrimary: (enabled, pressed) => ({
+        minHeight: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 12, fontWeight: 650,
+        border: '1px solid #e8548f', background: '#e8548f', color: '#160c12',
+        opacity: enabled ? 1 : 0.38,
+        transform: pressed ? 'scale(0.96)' : 'scale(1)',
+      }),
+      footerSecondary: (enabled) => ({
+        minHeight: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 12, fontWeight: 650,
+        border: '1px solid #3b3744', background: '#1b1920', color: '#ded7e2',
+        opacity: enabled ? 1 : 0.38,
+      }),
+    };
+
+    function Popup({ t }) {
+      const captured = t >= T.captured;
+      const tab = t < T.tabMapping ? 'preview' : (t < T.tabJson ? 'mapping' : 'json');
+      const capturePressed = t >= T.capture && t < T.capture + 0.16;
+      const downloadPressed = t >= T.download && t < T.download + 0.16;
+
+      const rowAnim = (i, base) => {
+        const lt = Math.max(0, Math.min(1, (t - base - i * 0.11) / 0.34));
+        return { op: lt, ty: (1 - Easing.expoOut(lt)) * 10 };
+      };
+
+      // JSON chunk reveal: stepwise, not per-char
+      const jsonN = (() => {
+        const raw = interpolate(t, T.jsonIn, [0, JSON_TEXT.length]);
+        return Math.floor(raw / 16) * 16;
+      })();
+
+      return (
+        <div style={popupStyles.shell}>
+          {/* masthead */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, paddingBottom: 14, borderBottom: '1px solid #34313d' }}>
+            <div>
+              <p style={popupStyles.eyebrow}>CREATOR TOOLS / CARD TRANSFER</p>
+              <h1 style={popupStyles.h1}>Creator Card Porter</h1>
+            </div>
+            <span style={popupStyles.pill(captured ? 'ready' : 'idle')}>{captured ? 'Captured' : 'Waiting'}</span>
+          </div>
+
+          {/* platform row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 170px', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #292630', color: '#c9c2cf', fontSize: 12 }}>
+            <span>Source platform</span>
+            <div style={{ border: '1px solid #3b3744', borderRadius: 9, background: '#1c1a22', padding: '7px 10px', color: '#f7f5fb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              JanitorAI
+              <svg width="10" height="6" viewBox="0 0 10 6"><path d="M1 1 L5 5 L9 1" fill="none" stroke="#8e8796" strokeWidth="1.6" strokeLinecap="round"/></svg>
+            </div>
+          </div>
+
+          <div style={popupStyles.disclosure}>
+            <strong style={{ color: '#d8f6e8' }}>Manual capture only.</strong>{' '}
+            When you click Capture current page, the extension reads creator fields from that tab and stores them locally in this browser. Nothing is uploaded.
+          </div>
+
+          {/* capture actions */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1.25fr 0.75fr', gap: 8, padding: '11px 0 0' }}>
+            <div style={popupStyles.captureBtn(capturePressed)}>Capture current page</div>
+            <div style={popupStyles.ghostBtn}>Clear captures</div>
+          </div>
+
+          {!captured && (
+            <div style={{ display: 'grid', gridTemplateColumns: '34px 1fr', gap: 12, margin: '18px 0', padding: 16, border: '1px dashed #474250', borderRadius: 12, background: '#18161d' }}>
+              <span style={{ color: '#e8548f', fontFamily: 'var(--font-mono)', fontSize: 22 }}>↳</span>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>No character or lorebook captured yet</div>
+                <div style={{ color: '#aaa2b1', fontSize: 11.5, lineHeight: 1.55 }}>
+                  Open your character page, let the fields load, then select Capture current page.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {captured && (
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {/* source strip */}
+              <div style={{ padding: '11px 0' }}>
+                <span style={{ display: 'block', marginBottom: 3, color: '#8e8796', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Cached migration set</span>
+                <strong style={{ fontSize: 14 }}>Aveline</strong>
+              </div>
+              {/* tabs */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 3, padding: 3, borderRadius: 10, background: '#1b1920' }}>
+                <div style={popupStyles.tab(tab === 'preview')}>Preview</div>
+                <div style={popupStyles.tab(tab === 'mapping')}>Mapping</div>
+                <div style={popupStyles.tab(tab === 'json')}>JSON</div>
+              </div>
+
+              {tab === 'preview' && (
+                <div style={{ marginTop: 10, border: '1px solid #302d37', borderRadius: 10, background: '#17151b', overflow: 'hidden' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.2fr 1fr', borderBottom: '1px solid #302d37', background: 'rgba(232,84,143,0.045)' }}>
+                    {[['PLATFORM', 'janitorai'], ['TYPE', 'character'], ['FIELDS', '6 captured']].map(([k, v]) => (
+                      <div key={k} style={{ padding: '8px 10px', borderRight: '1px solid #302d37' }}>
+                        <span style={{ display: 'block', marginBottom: 3, color: '#817986', fontFamily: 'var(--font-mono)', fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{k}</span>
+                        <strong style={{ color: '#e8e1eb', fontSize: 10, fontWeight: 600 }}>{v}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ padding: '9px 10px 4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                      <strong style={{ color: '#f4eef6', fontSize: 11 }}>Character</strong>
+                      <span style={{ color: '#817986', fontFamily: 'var(--font-mono)', fontSize: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>source.character.data</span>
+                    </div>
+                    {PREVIEW_ROWS.map(([k, v], i) => {
+                      const { op, ty } = rowAnim(i, T.previewIn);
+                      return (
+                        <div key={k} style={popupStyles.fieldRow(op, ty)}>
+                          <code style={{ overflow: 'hidden', color: '#a59dab', fontFamily: 'var(--font-mono)', fontSize: 9, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</code>
+                          <span style={{ overflow: 'hidden', color: '#ddd6e1', fontSize: 10, lineHeight: 1.4, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {tab === 'mapping' && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,0.95fr) minmax(0,1.15fr) 62px', gap: 8, padding: '0 10px 6px', color: '#7f7886', fontFamily: 'var(--font-mono)', fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    <span>Source field</span><span>Target field</span><span style={{ textAlign: 'right' }}>State</span>
+                  </div>
+                  <div style={{ border: '1px solid #302d37', borderRadius: 10, overflow: 'hidden' }}>
+                    {MAPPING_ROWS.map(([src, tgt, st], i) => {
+                      const { op, ty } = rowAnim(i, T.mappingIn);
+                      return (
+                        <div key={src} style={{
+                          display: 'grid', gridTemplateColumns: 'minmax(0,0.95fr) minmax(0,1.15fr) 62px', gap: 8,
+                          alignItems: 'center', minHeight: 34, padding: '6px 10px',
+                          borderBottom: i < MAPPING_ROWS.length - 1 ? '1px solid #292630' : 'none',
+                          opacity: op, transform: `translateY(${ty}px)`, fontSize: 10,
+                        }}>
+                          <code style={{ overflow: 'hidden', color: '#cfc7d4', fontFamily: 'var(--font-mono)', fontSize: 8.5, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src.replace('source.character.data.', '')}</code>
+                          <span style={{ overflow: 'hidden', color: '#f2edf5', fontFamily: 'var(--font-mono)', fontSize: 8.5, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tgt}</span>
+                          <span style={popupStyles.statePill(st)}>{st}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {tab === 'json' && (
+                <div style={{ marginTop: 10, border: '1px solid #302d37', borderRadius: 10, background: '#17151b', padding: 11, height: 262, overflow: 'hidden' }}>
+                  <pre style={{ margin: 0, color: '#d7d0dc', fontFamily: 'var(--font-mono)', fontSize: 9, lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {JSON_TEXT.slice(0, jsonN)}
+                    <span style={{ display: 'inline-block', width: 6, height: 11, background: '#e8548f', verticalAlign: '-1px', opacity: jsonN < JSON_TEXT.length ? 1 : 0 }} />
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* footer */}
+          <div style={{ display: 'grid', gridTemplateColumns: '0.8fr 1.2fr', gap: 8, marginTop: 'auto', paddingTop: 12 }}>
+            <div style={popupStyles.footerSecondary(captured)}>Copy JSON</div>
+            <div style={popupStyles.footerPrimary(captured, downloadPressed)}>Download JSON</div>
+          </div>
+          <p style={{ margin: '8px 0 0', textAlign: 'center', fontSize: 10, color: '#9d95a3' }}>Privacy &amp; data use</p>
+        </div>
+      );
+    }
+
+    // ── export toast ────────────────────────────────────────────────────
+    function ExportToast({ t }) {
+      const p = Easing.expoOut(Math.max(0, Math.min(1, (t - T.toast) / 0.55)));
+      if (p <= 0) return null;
+      return (
+        <div style={{
+          position: 'absolute', left: 960 - 225, bottom: 300, width: 450,
+          display: 'flex', alignItems: 'center', gap: 14,
+          background: '#1c1a22', border: '1px solid #3b3744', borderRadius: 14,
+          padding: '15px 18px',
+          boxShadow: '0 22px 60px rgba(0,0,0,0.55)',
+          opacity: p, transform: `translateY(${(1 - p) * 26}px)`,
+        }}>
+          <div style={{ width: 38, height: 38, borderRadius: '50%', background: 'rgba(123,224,180,0.12)', border: '1px solid rgba(123,224,180,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <svg width="17" height="17" viewBox="0 0 24 24"><path d="M4 12.5 L10 18.5 L20 6.5" fill="none" stroke="#7be0b4" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 650, color: '#f7f5fb', fontFamily: 'var(--font-mono)' }}>aveline.form-source.json</div>
+            <div style={{ marginTop: 3, fontSize: 12, color: '#9a93a8' }}>creator-card-porter.character-form-source v2 · 11.8 KB · saved to Downloads</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── end card ────────────────────────────────────────────────────────
+    function EndCard({ t }) {
+      const op = interpolate(t, [T.endcard, T.endcard + 0.45], [0, 1]);
+      if (op <= 0) return null;
+      const logoP = Math.max(0, Math.min(1, (t - T.endcard) / 0.8));
+      const logoScale = 0.3 + 0.7 * Easing.overshoot(logoP);
+      const logoBlur = (1 - Easing.expoOut(logoP)) * 8;
+      const fade = (from, dur) => {
+        const p = Math.max(0, Math.min(1, (t - from) / dur));
+        return { opacity: p, transform: `translateY(${(1 - Easing.expoOut(p)) * 16}px)` };
+      };
+      return (
+        <div style={{
+          position: 'absolute', inset: 0, opacity: op,
+          background: 'radial-gradient(900px 500px at 50% 38%, rgba(232,84,143,0.10), transparent 70%), #111016',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <img src={ICON} alt="" style={{ width: 128, height: 128, borderRadius: 28, transform: `scale(${logoScale})`, filter: `blur(${logoBlur}px)`, boxShadow: '0 24px 70px rgba(232,84,143,0.3)' }} />
+          <div style={{ marginTop: 34, fontSize: 64, fontWeight: 800, letterSpacing: '-0.035em', color: '#f7f5fb', ...fade(T.endcard + 0.35, 0.4) }}>
+            Creator Card Porter
+          </div>
+          <div style={{ marginTop: 14, fontSize: 26, color: '#aa9fb1', letterSpacing: '-0.01em', ...fade(T.endcard + 0.55, 0.4) }}>
+            Your characters. Portable.
+          </div>
+          <div style={{ marginTop: 30, fontFamily: 'var(--font-mono)', fontSize: 13, letterSpacing: '0.18em', color: '#817986', textTransform: 'uppercase', ...fade(T.endcard + 0.75, 0.4) }}>
+            Chrome MV3 · Local-first · MIT
+          </div>
+        </div>
+      );
+    }
+
+    // ── scene root ──────────────────────────────────────────────────────
+    function Scene() {
+      const t = useTime();
+
+      // camera: zoom toward popup as it opens; pan down to reveal footer for the download beat
+      const z = interpolate(t, T.zoom, [1, 1.4], Easing.expoOut);
+      const fx = interpolate(t, T.zoom, [960, 1418], Easing.expoOut);
+      const fy = interpolate(t, T.zoom, [540, 488], Easing.expoOut)
+               + interpolate(t, [11.85, 12.6], [0, 57], Easing.easeInOut);
+
+      // collapse into end card
+      const cP = Math.max(0, Math.min(1, (t - T.collapse[0]) / (T.collapse[1] - T.collapse[0])));
+      const cE = Easing.expoIn ? Easing.expoIn(cP) : cP * cP;
+      const sceneOp = 1 - interpolate(t, T.collapse, [0, 1]);
+      const sceneBlur = interpolate(t, T.collapse, [0, 12]);
+      const sceneScale = 1 - 0.06 * cE;
+
+      // browser window entrance
+      const inP = Easing.expoOut(Math.max(0, Math.min(1, (t - T.pageIn[0]) / (T.pageIn[1] - T.pageIn[0]))));
+
+      // popup spring-open
+      const popP = Math.max(0, Math.min(1, (t - T.popupOpen) / 0.55));
+      const popScale = 0.55 + 0.45 * Easing.overshoot(popP);
+      const popOp = interpolate(t, [T.popupOpen, T.popupOpen + 0.18], [0, 1]);
+
+      const [cx, cy] = cursorPos(t);
+      const cursorOp = interpolate(t, [0.35, 0.8], [0, 1]) * (1 - interpolate(t, T.collapse, [0, 1]));
+
+      return (
+        <div style={{ position: 'absolute', inset: 0, background: '#0b0a10' }}>
+          {/* camera */}
+          <div style={{
+            position: 'absolute', inset: 0, transformOrigin: '0 0',
+            transform: `translate(${960 - fx * z}px, ${540 - fy * z}px) scale(${z * sceneScale})`,
+            opacity: sceneOp, filter: `blur(${sceneBlur}px)`,
+          }}>
+            <div style={{ opacity: inP, transform: `translateY(${(1 - inP) * 26}px)`, position: 'absolute', inset: 0 }}>
+              <BrowserFrame />
+
+              {popOp > 0 && (
+                <div style={{
+                  position: 'absolute', top: POPUP_TOP, right: POPUP_RIGHT, width: 420,
+                  transformOrigin: 'top right',
+                  transform: `scale(${POPUP_SCALE * popScale})`,
+                  opacity: popOp,
+                }}>
+                  <Popup t={t} />
+                </div>
+              )}
+
+              <ExportToast t={t} />
+
+              <ClickRings t={t} />
+              <div style={{ position: 'absolute', left: cx - 5, top: cy - 3, opacity: cursorOp, pointerEvents: 'none', zIndex: 50 }}>
+                <CursorArrow />
+              </div>
+            </div>
+          </div>
+
+          <EndCard t={t} />
+
+          {/* watermark — animation deliverable only, per skill convention */}
+          <div style={{
+            position: 'absolute', bottom: 24, right: 32, zIndex: 100,
+            fontSize: 11, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.15em',
+            fontFamily: 'var(--font-mono)', pointerEvents: 'none',
+          }}>
+            Created by Pegasus-Design
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      return (
+        <Stage duration={DURATION} width={1920} height={1080} bgColor="#0b0a10">
+          <Scene />
+        </Stage>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
