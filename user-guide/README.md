@@ -8,8 +8,8 @@ Creator Card Porter is a Chrome extension for moving character cards between
 platforms.
 
 It reads characters and Lorebooks that you are authorized to manage on the
-source platform, then organizes them into a JSON file that can be imported on
-the target platform's create page.
+source platform, then organizes them into a JSON file you can keep as a backup
+or import into any tool that accepts this format.
 
 The extension only reads, previews, and exports data. It never publishes a
 character automatically.
@@ -115,16 +115,12 @@ If the character uses a Lorebook:
 
 ---
 
-### Optional: Import into the target platform
+### Optional: Import elsewhere
 
-1. Open the target platform's create or edit character page.
-2. Scroll down to the `Beta` group.
-3. Find `Character import` after `Client Tools`.
-4. Click **Choose JSON file**.
-5. Select the JSON exported by the extension.
-6. Review the field preview.
-7. Click **Apply to form**.
-8. Check the completed form before saving or publishing.
+The exported JSON follows the `creator-card-porter.character-form-source`
+format described in the repository README. You can keep it as a backup, edit
+it by hand, or feed it to any importer that understands this format. Always
+review the mapped fields in the destination before saving or publishing.
 
 ## Three common mistakes
 
